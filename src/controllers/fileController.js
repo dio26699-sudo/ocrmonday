@@ -364,9 +364,9 @@ class FileController {
    */
   async scanQRCode(filePath) {
     try {
-      // Load and resize image to max 1500px (better quality, still fast on Render)
+      // Load and resize image to max 1200px (memory-efficient for Render free tier 512MB)
       let image = await Jimp.read(filePath);
-      const maxDimension = 1500;
+      const maxDimension = 1200;
 
       if (image.bitmap.width > maxDimension || image.bitmap.height > maxDimension) {
         if (image.bitmap.width > image.bitmap.height) {
