@@ -86,20 +86,25 @@ async function processQueue() {
 
       try {
         await processItemExtraction(itemId, boardId);
+        console.log(`✅ Completed item ${itemId}`);
       } catch (error) {
         console.error(`❌ Failed to process item ${itemId}:`, error.message);
+        // Continue processing queue even if one item fails
       }
 
-      // Small delay to prevent overwhelming the API
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Small delay between items
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
+  } catch (processorError) {
+    console.error(`❌ Processor crashed:`, processorError.message);
   } finally {
     // This processor is done
     activeProcessors--;
     console.log(`✅ Processor finished (${activeProcessors} processors still active, ${processingQueue.length} items in queue)`);
 
-    // Check if there are more items that need processing
-    if (processingQueue.length > 0) {
+    // Always restart processors if there are more items
+    if (processingQueue.length > 0 && activeProcessors < MAX_CONCURRENT_PROCESSORS) {
+      console.log(`🔄 Restarting processor for ${processingQueue.length} remaining items`);
       startProcessors();
     }
   }
