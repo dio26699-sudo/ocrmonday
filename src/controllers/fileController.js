@@ -364,28 +364,32 @@ class FileController {
    */
   async scanQRCode(filePath) {
     try {
-      // Load and resize image to max 800px (aggressive memory optimization for 512MB)
+      // Load image - keep original size first for better QR detection
       let image = await Jimp.read(filePath);
-      const maxDimension = 800;
+      const originalWidth = image.bitmap.width;
+      const originalHeight = image.bitmap.height;
 
-      if (image.bitmap.width > maxDimension || image.bitmap.height > maxDimension) {
-        if (image.bitmap.width > image.bitmap.height) {
-          image.resize(maxDimension, Jimp.AUTO);
-        } else {
-          image.resize(Jimp.AUTO, maxDimension);
-        }
-      }
+      console.log(`Image dimensions: ${originalWidth}x${originalHeight}`);
 
-      // Try scanning original
+      // Try scanning original first (best quality)
       let code = this.tryQRScan(image);
       if (code) {
-        image = null; // Free memory immediately
+        image = null;
         if (global.gc) global.gc();
         return code;
       }
 
-      // Try with contrast enhancement
-      image.contrast(0.5).greyscale();
+      // Try with greyscale + contrast (helps with poor lighting)
+      image.greyscale().contrast(0.5);
+      code = this.tryQRScan(image);
+      if (code) {
+        image = null;
+        if (global.gc) global.gc();
+        return code;
+      }
+
+      // Try with brightness adjustment
+      image.brightness(0.2);
       code = this.tryQRScan(image);
       if (code) {
         image = null;
@@ -396,6 +400,24 @@ class FileController {
       // Try with stronger contrast
       image.contrast(0.5);
       code = this.tryQRScan(image);
+      if (code) {
+        image = null;
+        if (global.gc) global.gc();
+        return code;
+      }
+
+      // Last resort: resize if image is very large (might be too detailed)
+      if (originalWidth > 2000 || originalHeight > 2000) {
+        image = await Jimp.read(filePath); // Reload fresh
+        const maxDimension = 1200;
+        if (image.bitmap.width > image.bitmap.height) {
+          image.resize(maxDimension, Jimp.AUTO);
+        } else {
+          image.resize(Jimp.AUTO, maxDimension);
+        }
+        image.greyscale().contrast(0.3);
+        code = this.tryQRScan(image);
+      }
 
       // Free memory
       image = null;
