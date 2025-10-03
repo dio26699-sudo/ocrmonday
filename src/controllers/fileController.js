@@ -72,8 +72,8 @@ class FileController {
 
       const page = await pdfDocument.getPage(1);
 
-      // Try multiple scales to improve QR detection
-      const scales = [3.0, 2.5, 2.0, 1.5];
+      // Try multiple scales to improve QR detection (higher = better QR resolution)
+      const scales = [4.0, 3.5, 3.0, 2.5, 2.0];
 
       for (const scale of scales) {
         try {
@@ -112,39 +112,7 @@ class FileController {
         }
       }
 
-      console.log(`  ⚠️  QR code not detected in PDF (tried ${scales.length} scales)`);
-      console.log(`  🔄 Attempting OCR fallback for ATCUD...`);
-
-      // Fallback: Try OCR to extract ATCUD and parse invoice data from text
-      try {
-        const viewport = page.getViewport({ scale: 2.0 });
-        const canvas = createCanvas(viewport.width, viewport.height);
-        const context = canvas.getContext('2d');
-        await page.render({ canvasContext: context, viewport: viewport }).promise;
-
-        const imageBuffer = canvas.toBuffer('image/png');
-        tempImagePath = filePath.replace('.pdf', '_ocr.png');
-        require('fs').writeFileSync(tempImagePath, imageBuffer);
-
-        const Tesseract = require('tesseract.js');
-        const { data: { text } } = await Tesseract.recognize(tempImagePath, 'por', {
-          logger: () => {} // Silent
-        });
-
-        // Try to parse invoice data from OCR text
-        const invoiceData = this.parseInvoiceData(text);
-
-        if (invoiceData.totalValue || invoiceData.invoiceNumber) {
-          console.log(`  📝 OCR extracted data`);
-          return {
-            text: text,
-            method: 'ocr-fallback',
-            ...invoiceData
-          };
-        }
-      } catch (ocrError) {
-        console.log(`  ⚠️  OCR fallback failed: ${ocrError.message}`);
-      }
+      console.log(`  ❌ QR code not detected in PDF after trying ${scales.length} different scales`);
 
       return {
         text: '',
@@ -461,6 +429,26 @@ class FileController {
 
       // Strategy 10: Aggressive posterize
       code = await tryStrategy('posterize-aggressive', (img) => img.greyscale().normalize().posterize(2));
+      if (code) return code;
+
+      // Strategy 11: High brightness + normalize (for dark scans)
+      code = await tryStrategy('bright-normalize', (img) => img.greyscale().brightness(0.4).normalize().contrast(0.8));
+      if (code) return code;
+
+      // Strategy 12: Low brightness + high contrast (for overexposed scans)
+      code = await tryStrategy('dark-contrast', (img) => img.greyscale().brightness(-0.2).contrast(0.9));
+      if (code) return code;
+
+      // Strategy 13: Posterize first, then normalize (different order)
+      code = await tryStrategy('posterize-first', (img) => img.greyscale().posterize(3).normalize().contrast(0.5));
+      if (code) return code;
+
+      // Strategy 14: Double contrast application
+      code = await tryStrategy('double-contrast', (img) => img.greyscale().contrast(0.5).normalize().contrast(0.8));
+      if (code) return code;
+
+      // Strategy 15: Invert + normalize (for negative-like images)
+      code = await tryStrategy('invert-normalize', (img) => img.greyscale().invert().normalize().contrast(0.7));
       if (code) return code;
 
       // Free memory
