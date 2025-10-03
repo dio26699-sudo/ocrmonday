@@ -340,119 +340,82 @@ class FileController {
    * Scan QR code from image with preprocessing
    */
   async scanQRCode(filePath) {
+    const tryStrategy = async (name, processFn) => {
+      try {
+        const image = await Jimp.read(filePath);
+        processFn(image);
+        const code = this.tryQRScan(image);
+        if (code) {
+          if (global.gc) global.gc();
+          return code;
+        }
+      } catch (err) {
+        // Strategy failed, continue to next
+      }
+      return null;
+    };
+
     try {
-      // Load image - keep original size first for better QR detection
-      let image = await Jimp.read(filePath);
+      // Load image to get dimensions
+      const image = await Jimp.read(filePath);
       const originalWidth = image.bitmap.width;
       const originalHeight = image.bitmap.height;
 
-      // Strategy 1: Try original first
-      let code = this.tryQRScan(image);
-      if (code) {
-        image = null;
-        if (global.gc) global.gc();
-        return code;
-      }
+      // Strategy 1: Original
+      let code = await tryStrategy('original', (img) => {});
+      if (code) return code;
 
-      // Strategy 2: Greyscale + high contrast (good for scanned docs)
-      image = await Jimp.read(filePath);
-      image.greyscale().contrast(0.8);
-      code = this.tryQRScan(image);
-      if (code) {
-        image = null;
-        if (global.gc) global.gc();
-        return code;
-      }
+      // Strategy 2: Greyscale + high contrast
+      code = await tryStrategy('greyscale-contrast', (img) => img.greyscale().contrast(0.8));
+      if (code) return code;
 
-      // Strategy 3: Normalize + threshold (binary image for QR codes)
-      image = await Jimp.read(filePath);
-      image.greyscale().normalize().contrast(1.0);
-      code = this.tryQRScan(image);
-      if (code) {
-        image = null;
-        if (global.gc) global.gc();
-        return code;
-      }
+      // Strategy 3: Normalize + max contrast
+      code = await tryStrategy('normalize-contrast', (img) => img.greyscale().normalize().contrast(1.0));
+      if (code) return code;
 
-      // Strategy 4: Invert + high contrast (some QR codes have inverted colors)
-      image = await Jimp.read(filePath);
-      image.greyscale().invert().contrast(0.8);
-      code = this.tryQRScan(image);
-      if (code) {
-        image = null;
-        if (global.gc) global.gc();
-        return code;
-      }
+      // Strategy 4: Invert + contrast
+      code = await tryStrategy('invert', (img) => img.greyscale().invert().contrast(0.8));
+      if (code) return code;
 
-      // Strategy 5: Brightness + contrast for dark images
-      image = await Jimp.read(filePath);
-      image.greyscale().brightness(0.3).contrast(0.8);
-      code = this.tryQRScan(image);
-      if (code) {
-        image = null;
-        if (global.gc) global.gc();
-        return code;
-      }
+      // Strategy 5: Brightness + contrast
+      code = await tryStrategy('brightness', (img) => img.greyscale().brightness(0.3).contrast(0.8));
+      if (code) return code;
 
-      // Strategy 6: Posterize for thermal receipts (reduces grey levels)
-      image = await Jimp.read(filePath);
-      image.greyscale().posterize(2).contrast(0.5);
-      code = this.tryQRScan(image);
-      if (code) {
-        image = null;
-        if (global.gc) global.gc();
-        return code;
-      }
+      // Strategy 6: Posterize for thermal receipts
+      code = await tryStrategy('posterize', (img) => img.greyscale().posterize(2).contrast(0.5));
+      if (code) return code;
 
-      // Strategy 7: Blur then sharpen (removes noise, enhances edges)
-      image = await Jimp.read(filePath);
-      image.greyscale().blur(1).contrast(1.0);
-      code = this.tryQRScan(image);
-      if (code) {
-        image = null;
-        if (global.gc) global.gc();
-        return code;
-      }
+      // Strategy 7: Blur then contrast
+      code = await tryStrategy('blur', (img) => img.greyscale().blur(1).contrast(0.8));
+      if (code) return code;
 
-      // Strategy 8: Extreme contrast + normalize
-      image = await Jimp.read(filePath);
-      image.greyscale().normalize().contrast(1.5);
-      code = this.tryQRScan(image);
-      if (code) {
-        image = null;
-        if (global.gc) global.gc();
-        return code;
-      }
+      // Strategy 8: Normalize only (no contrast)
+      code = await tryStrategy('normalize-only', (img) => img.greyscale().normalize());
+      if (code) return code;
 
-      // Strategy 9: For very large images, try at multiple scales
+      // Strategy 9: Multi-scale for large images
       if (originalWidth > 2000 || originalHeight > 2000) {
         for (const scale of [1600, 1200, 800]) {
-          image = await Jimp.read(filePath);
-          if (image.bitmap.width > image.bitmap.height) {
-            image.resize(scale, Jimp.AUTO);
-          } else {
-            image.resize(Jimp.AUTO, scale);
-          }
-          image.greyscale().normalize().contrast(0.8);
-          code = this.tryQRScan(image);
-          if (code) {
-            image = null;
-            if (global.gc) global.gc();
-            return code;
-          }
+          code = await tryStrategy(`scale-${scale}`, (img) => {
+            if (img.bitmap.width > img.bitmap.height) {
+              img.resize(scale, Jimp.AUTO);
+            } else {
+              img.resize(Jimp.AUTO, scale);
+            }
+            img.greyscale().normalize().contrast(0.8);
+          });
+          if (code) return code;
         }
       }
 
-      // Strategy 10: Last resort - aggressive posterize
-      image = await Jimp.read(filePath);
-      image.greyscale().normalize().posterize(2);
-      code = this.tryQRScan(image);
+      // Strategy 10: Aggressive posterize
+      code = await tryStrategy('posterize-aggressive', (img) => img.greyscale().normalize().posterize(2));
+      if (code) return code;
 
       // Free memory
-      image = null;
       if (global.gc) global.gc();
 
-      return code;
+      return null;
     } catch (error) {
       console.log(`  ⚠️  QR scan error: ${error.message}`);
       if (global.gc) global.gc();
