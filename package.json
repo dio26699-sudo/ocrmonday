@@ -1,0 +1,28 @@
+{
+  "name": "monday-ocr-app",
+  "version": "1.0.0",
+  "description": "Monday.com OCR app for invoice extraction",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@mondaycom/apps-sdk": "^3.2.1",
+    "@zxing/library": "^0.21.3",
+    "axios": "^1.6.0",
+    "canvas": "^2.11.2",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "jimp": "^0.22.10",
+    "jsqr": "^1.4.0",
+    "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^3.11.174",
+    "tesseract.js": "^5.0.4"
+  },
+  "keywords": [
+    "monday.com",
+    "ocr"
+  ],
+  "author": "",
+  "license": "ISC"
+}
