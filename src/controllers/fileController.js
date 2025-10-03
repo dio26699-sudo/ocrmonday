@@ -72,8 +72,9 @@ class FileController {
 
       const page = await pdfDocument.getPage(1);
 
-      // Try multiple scales to improve QR detection (higher = better QR resolution)
-      const scales = [4.0, 3.5, 3.0, 2.5, 2.0];
+      // Try only 2 scales - memory constrained (512MB on Railway)
+      // Higher scale first for better QR resolution
+      const scales = [3.0, 2.0];
 
       for (const scale of scales) {
         try {
@@ -88,17 +89,21 @@ class FileController {
           tempImagePath = filePath.replace('.pdf', `_temp_${scale}.png`);
           require('fs').writeFileSync(tempImagePath, imageBuffer);
 
-          console.log(`  📐 PDF rendered at ${scale}x scale (${Math.round(viewport.width)}x${Math.round(viewport.height)}px)`);
+          console.log(`  📐 PDF @ ${scale}x (${Math.round(viewport.width)}x${Math.round(viewport.height)}px)`);
 
           const qrData = await this.scanQRCode(tempImagePath);
 
-          // Clean up this temp file
+          // Clean up immediately to free memory
           try {
             require('fs').unlinkSync(tempImagePath);
+            tempImagePath = null;
           } catch (e) {}
 
+          // Force garbage collection after each scale
+          if (global.gc) global.gc();
+
           if (qrData) {
-            console.log(`  🔍 QR Found (PDF @ ${scale}x): ${qrData.substring(0, 50)}...`);
+            console.log(`  🔍 QR Found @ ${scale}x: ${qrData.substring(0, 50)}...`);
             const invoiceData = this.parseQRCodeData(qrData);
             return {
               text: qrData,
@@ -108,11 +113,12 @@ class FileController {
           }
         } catch (scaleError) {
           console.log(`  ⚠️  Scale ${scale}x failed: ${scaleError.message}`);
-          // Try next scale
+          // Force GC and try next scale
+          if (global.gc) global.gc();
         }
       }
 
-      console.log(`  ❌ QR code not detected in PDF after trying ${scales.length} different scales`);
+      console.log(`  ❌ QR not found (tried ${scales.length} scales)`);
 
       return {
         text: '',
@@ -380,75 +386,30 @@ class FileController {
       const originalWidth = image.bitmap.width;
       const originalHeight = image.bitmap.height;
 
+      // Try only the 6 most effective strategies (memory constrained: 512MB)
+
       // Strategy 1: Original
       let code = await tryStrategy('original', (img) => {});
       if (code) return code;
 
-      // Strategy 2: Greyscale + high contrast
-      code = await tryStrategy('greyscale-contrast', (img) => img.greyscale().contrast(0.8));
+      // Strategy 2: Normalize + contrast (best for general scans)
+      code = await tryStrategy('normalize', (img) => img.greyscale().normalize().contrast(0.8));
       if (code) return code;
 
-      // Strategy 3: Normalize + max contrast
-      code = await tryStrategy('normalize-contrast', (img) => img.greyscale().normalize().contrast(1.0));
+      // Strategy 3: Posterize for thermal receipts
+      code = await tryStrategy('posterize', (img) => img.greyscale().posterize(2).normalize());
       if (code) return code;
 
-      // Strategy 4: Invert + contrast
+      // Strategy 4: Invert (for inverted QR codes)
       code = await tryStrategy('invert', (img) => img.greyscale().invert().contrast(0.8));
       if (code) return code;
 
-      // Strategy 5: Brightness + contrast
-      code = await tryStrategy('brightness', (img) => img.greyscale().brightness(0.3).contrast(0.8));
+      // Strategy 5: High brightness (for dark scans)
+      code = await tryStrategy('bright', (img) => img.greyscale().brightness(0.3).normalize().contrast(0.8));
       if (code) return code;
 
-      // Strategy 6: Posterize for thermal receipts
-      code = await tryStrategy('posterize', (img) => img.greyscale().posterize(2).contrast(0.5));
-      if (code) return code;
-
-      // Strategy 7: Blur then contrast
-      code = await tryStrategy('blur', (img) => img.greyscale().blur(1).contrast(0.8));
-      if (code) return code;
-
-      // Strategy 8: Normalize only (no contrast)
-      code = await tryStrategy('normalize-only', (img) => img.greyscale().normalize());
-      if (code) return code;
-
-      // Strategy 9: Multi-scale for large images
-      if (originalWidth > 2000 || originalHeight > 2000) {
-        for (const scale of [1600, 1200, 800]) {
-          code = await tryStrategy(`scale-${scale}`, (img) => {
-            if (img.bitmap.width > img.bitmap.height) {
-              img.resize(scale, Jimp.AUTO);
-            } else {
-              img.resize(Jimp.AUTO, scale);
-            }
-            img.greyscale().normalize().contrast(0.8);
-          });
-          if (code) return code;
-        }
-      }
-
-      // Strategy 10: Aggressive posterize
-      code = await tryStrategy('posterize-aggressive', (img) => img.greyscale().normalize().posterize(2));
-      if (code) return code;
-
-      // Strategy 11: High brightness + normalize (for dark scans)
-      code = await tryStrategy('bright-normalize', (img) => img.greyscale().brightness(0.4).normalize().contrast(0.8));
-      if (code) return code;
-
-      // Strategy 12: Low brightness + high contrast (for overexposed scans)
-      code = await tryStrategy('dark-contrast', (img) => img.greyscale().brightness(-0.2).contrast(0.9));
-      if (code) return code;
-
-      // Strategy 13: Posterize first, then normalize (different order)
-      code = await tryStrategy('posterize-first', (img) => img.greyscale().posterize(3).normalize().contrast(0.5));
-      if (code) return code;
-
-      // Strategy 14: Double contrast application
-      code = await tryStrategy('double-contrast', (img) => img.greyscale().contrast(0.5).normalize().contrast(0.8));
-      if (code) return code;
-
-      // Strategy 15: Invert + normalize (for negative-like images)
-      code = await tryStrategy('invert-normalize', (img) => img.greyscale().invert().normalize().contrast(0.7));
+      // Strategy 6: Greyscale + high contrast
+      code = await tryStrategy('contrast', (img) => img.greyscale().contrast(0.9));
       if (code) return code;
 
       // Free memory
