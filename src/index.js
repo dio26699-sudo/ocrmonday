@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 // Processing queue to prevent concurrent overload
 let processingQueue = [];
 let activeProcessors = 0;
-const MAX_CONCURRENT_PROCESSORS = 1; // Process 1 item at a time to prevent timeouts
+const MAX_CONCURRENT_PROCESSORS = 3; // Process 3 items simultaneously on Render (better resources)
 
 // Middleware
 app.use(express.json());

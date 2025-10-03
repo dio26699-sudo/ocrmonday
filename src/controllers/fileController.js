@@ -86,11 +86,20 @@ class FileController {
       const tempImagePath = filePath.replace('.pdf', '_temp.png');
       require('fs').writeFileSync(tempImagePath, imageBuffer);
 
-      const qrData = await this.scanQRCode(tempImagePath);
-      require('fs').unlinkSync(tempImagePath);
+      let qrData;
+      try {
+        qrData = await this.scanQRCode(tempImagePath);
+      } finally {
+        // Always cleanup temp file
+        try {
+          require('fs').unlinkSync(tempImagePath);
+        } catch (cleanupError) {
+          console.log(`Temp file cleanup warning: ${cleanupError.message}`);
+        }
+      }
 
       if (qrData) {
-        console.log(`✅ PDF QR extraction successful`);
+        console.log(`✅ PDF QR extracted`);
         const invoiceData = this.parseQRCodeData(qrData);
         return {
           text: qrData,
@@ -108,7 +117,7 @@ class FileController {
         customerNIF: null
       };
     } catch (error) {
-      console.log(`PDF QR scan error: ${error.message}`);
+      console.log(`PDF error: ${error.message}`);
       return {
         text: '',
         method: 'qr-code-pdf-error',
@@ -355,37 +364,35 @@ class FileController {
    */
   async scanQRCode(filePath) {
     try {
-      // Load and resize image to max 1200px for faster processing
+      // Load and resize image to max 1500px (better quality, still fast on Render)
       let image = await Jimp.read(filePath);
-      const maxDimension = 1200;
+      const maxDimension = 1500;
 
       if (image.bitmap.width > maxDimension || image.bitmap.height > maxDimension) {
-        console.log(`Resizing ${image.bitmap.width}x${image.bitmap.height} to fit ${maxDimension}px`);
         if (image.bitmap.width > image.bitmap.height) {
           image.resize(maxDimension, Jimp.AUTO);
         } else {
           image.resize(Jimp.AUTO, maxDimension);
         }
-        console.log(`Resized to ${image.bitmap.width}x${image.bitmap.height}`);
       }
 
       // Try scanning original
       let code = this.tryQRScan(image);
       if (code) return code;
 
-      // Try with contrast
+      // Try with contrast enhancement
       image.contrast(0.5).greyscale();
       code = this.tryQRScan(image);
       if (code) return code;
 
-      // Try with high contrast
+      // Try with stronger contrast
       image.contrast(0.5);
       code = this.tryQRScan(image);
       if (code) return code;
 
       return null;
     } catch (error) {
-      console.log(`QR scan failed: ${error.message}`);
+      console.log(`QR scan error: ${error.message}`);
       return null;
     }
   }
