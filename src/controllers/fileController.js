@@ -394,7 +394,37 @@ class FileController {
         return code;
       }
 
-      // Strategy 6: For very large images, try at multiple scales
+      // Strategy 6: Posterize for thermal receipts (reduces grey levels)
+      image = await Jimp.read(filePath);
+      image.greyscale().posterize(2).contrast(0.5);
+      code = this.tryQRScan(image);
+      if (code) {
+        image = null;
+        if (global.gc) global.gc();
+        return code;
+      }
+
+      // Strategy 7: Blur then sharpen (removes noise, enhances edges)
+      image = await Jimp.read(filePath);
+      image.greyscale().blur(1).contrast(1.0);
+      code = this.tryQRScan(image);
+      if (code) {
+        image = null;
+        if (global.gc) global.gc();
+        return code;
+      }
+
+      // Strategy 8: Extreme contrast + normalize
+      image = await Jimp.read(filePath);
+      image.greyscale().normalize().contrast(1.5);
+      code = this.tryQRScan(image);
+      if (code) {
+        image = null;
+        if (global.gc) global.gc();
+        return code;
+      }
+
+      // Strategy 9: For very large images, try at multiple scales
       if (originalWidth > 2000 || originalHeight > 2000) {
         for (const scale of [1600, 1200, 800]) {
           image = await Jimp.read(filePath);
@@ -413,11 +443,16 @@ class FileController {
         }
       }
 
+      // Strategy 10: Last resort - aggressive posterize
+      image = await Jimp.read(filePath);
+      image.greyscale().normalize().posterize(2);
+      code = this.tryQRScan(image);
+
       // Free memory
       image = null;
       if (global.gc) global.gc();
 
-      return null;
+      return code;
     } catch (error) {
       console.log(`  ⚠️  QR scan error: ${error.message}`);
       if (global.gc) global.gc();
@@ -431,15 +466,17 @@ class FileController {
   tryQRScan(image) {
     const { data, width, height } = image.bitmap;
 
-    // Try jsQR first (fast)
-    const code = jsQR(new Uint8ClampedArray(data), width, height);
+    // Try jsQR first (fast, good for clean images)
+    const code = jsQR(new Uint8ClampedArray(data), width, height, {
+      inversionAttempts: 'attemptBoth' // Try both normal and inverted
+    });
     if (code && code.data) {
       return code.data;
     }
 
-    // Try ZXing as fallback (more robust)
+    // Try ZXing as fallback (more robust for difficult QR codes)
     try {
-      const { BrowserQRCodeReader, BinaryBitmap, HybridBinarizer, RGBLuminanceSource } = require('@zxing/library');
+      const { BrowserQRCodeReader, BinaryBitmap, HybridBinarizer, GlobalHistogramBinarizer, RGBLuminanceSource } = require('@zxing/library');
 
       // Convert Jimp image to luminance data for ZXing
       const luminanceSource = new RGBLuminanceSource(
@@ -447,15 +484,32 @@ class FileController {
         width,
         height
       );
-      const binaryBitmap = new HybridBinarizer(luminanceSource);
-      const reader = new BrowserQRCodeReader();
 
-      const result = reader.decode(binaryBitmap);
-      if (result && result.getText()) {
-        return result.getText();
+      // Try HybridBinarizer first
+      try {
+        const binaryBitmap = new HybridBinarizer(luminanceSource);
+        const reader = new BrowserQRCodeReader();
+        const result = reader.decode(binaryBitmap);
+        if (result && result.getText()) {
+          return result.getText();
+        }
+      } catch (e) {
+        // Continue to GlobalHistogramBinarizer
+      }
+
+      // Try GlobalHistogramBinarizer (better for uneven lighting)
+      try {
+        const binaryBitmap2 = new GlobalHistogramBinarizer(luminanceSource);
+        const reader2 = new BrowserQRCodeReader();
+        const result2 = reader2.decode(binaryBitmap2);
+        if (result2 && result2.getText()) {
+          return result2.getText();
+        }
+      } catch (e) {
+        // Both ZXing methods failed
       }
     } catch (zxingError) {
-      // ZXing failed, continue
+      // ZXing failed completely
     }
 
     return null;
