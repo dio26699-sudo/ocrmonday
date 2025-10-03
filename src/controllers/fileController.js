@@ -346,7 +346,7 @@ class FileController {
       const originalWidth = image.bitmap.width;
       const originalHeight = image.bitmap.height;
 
-      // Try scanning original first (best quality)
+      // Strategy 1: Try original first
       let code = this.tryQRScan(image);
       if (code) {
         image = null;
@@ -354,8 +354,9 @@ class FileController {
         return code;
       }
 
-      // Try with greyscale + contrast (helps with poor lighting)
-      image.greyscale().contrast(0.5);
+      // Strategy 2: Greyscale + high contrast (good for scanned docs)
+      image = await Jimp.read(filePath);
+      image.greyscale().contrast(0.8);
       code = this.tryQRScan(image);
       if (code) {
         image = null;
@@ -363,8 +364,9 @@ class FileController {
         return code;
       }
 
-      // Try with brightness adjustment
-      image.brightness(0.2);
+      // Strategy 3: Normalize + threshold (binary image for QR codes)
+      image = await Jimp.read(filePath);
+      image.greyscale().normalize().contrast(1.0);
       code = this.tryQRScan(image);
       if (code) {
         image = null;
@@ -372,8 +374,9 @@ class FileController {
         return code;
       }
 
-      // Try with stronger contrast
-      image.contrast(0.5);
+      // Strategy 4: Invert + high contrast (some QR codes have inverted colors)
+      image = await Jimp.read(filePath);
+      image.greyscale().invert().contrast(0.8);
       code = this.tryQRScan(image);
       if (code) {
         image = null;
@@ -381,26 +384,42 @@ class FileController {
         return code;
       }
 
-      // Last resort: resize if image is very large (might be too detailed)
+      // Strategy 5: Brightness + contrast for dark images
+      image = await Jimp.read(filePath);
+      image.greyscale().brightness(0.3).contrast(0.8);
+      code = this.tryQRScan(image);
+      if (code) {
+        image = null;
+        if (global.gc) global.gc();
+        return code;
+      }
+
+      // Strategy 6: For very large images, try at multiple scales
       if (originalWidth > 2000 || originalHeight > 2000) {
-        image = await Jimp.read(filePath); // Reload fresh
-        const maxDimension = 1200;
-        if (image.bitmap.width > image.bitmap.height) {
-          image.resize(maxDimension, Jimp.AUTO);
-        } else {
-          image.resize(Jimp.AUTO, maxDimension);
+        for (const scale of [1600, 1200, 800]) {
+          image = await Jimp.read(filePath);
+          if (image.bitmap.width > image.bitmap.height) {
+            image.resize(scale, Jimp.AUTO);
+          } else {
+            image.resize(Jimp.AUTO, scale);
+          }
+          image.greyscale().normalize().contrast(0.8);
+          code = this.tryQRScan(image);
+          if (code) {
+            image = null;
+            if (global.gc) global.gc();
+            return code;
+          }
         }
-        image.greyscale().contrast(0.3);
-        code = this.tryQRScan(image);
       }
 
       // Free memory
       image = null;
       if (global.gc) global.gc();
 
-      return code;
+      return null;
     } catch (error) {
-      console.log(`QR scan error: ${error.message}`);
+      console.log(`  ⚠️  QR scan error: ${error.message}`);
       if (global.gc) global.gc();
       return null;
     }
