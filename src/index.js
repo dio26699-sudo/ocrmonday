@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 // Processing queue to prevent concurrent overload
 let processingQueue = [];
 let activeProcessors = 0;
-const MAX_CONCURRENT_PROCESSORS = 2; // Process 2 items (Render free tier: 512MB RAM limit)
+const MAX_CONCURRENT_PROCESSORS = 1; // Process 1 item at a time (Render free tier: 512MB RAM limit)
 
 // Middleware
 app.use(express.json());

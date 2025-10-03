@@ -364,9 +364,9 @@ class FileController {
    */
   async scanQRCode(filePath) {
     try {
-      // Load and resize image to max 1200px (memory-efficient for Render free tier 512MB)
+      // Load and resize image to max 800px (aggressive memory optimization for 512MB)
       let image = await Jimp.read(filePath);
-      const maxDimension = 1200;
+      const maxDimension = 800;
 
       if (image.bitmap.width > maxDimension || image.bitmap.height > maxDimension) {
         if (image.bitmap.width > image.bitmap.height) {
@@ -378,21 +378,33 @@ class FileController {
 
       // Try scanning original
       let code = this.tryQRScan(image);
-      if (code) return code;
+      if (code) {
+        image = null; // Free memory immediately
+        if (global.gc) global.gc();
+        return code;
+      }
 
       // Try with contrast enhancement
       image.contrast(0.5).greyscale();
       code = this.tryQRScan(image);
-      if (code) return code;
+      if (code) {
+        image = null;
+        if (global.gc) global.gc();
+        return code;
+      }
 
       // Try with stronger contrast
       image.contrast(0.5);
       code = this.tryQRScan(image);
-      if (code) return code;
 
-      return null;
+      // Free memory
+      image = null;
+      if (global.gc) global.gc();
+
+      return code;
     } catch (error) {
       console.log(`QR scan error: ${error.message}`);
+      if (global.gc) global.gc();
       return null;
     }
   }
