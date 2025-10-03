@@ -9,6 +9,10 @@ class MondayController {
     this.defaultBoardId = '1443407769';
     this.fileColumnId = 'arquivos';
 
+    // Simple in-memory cache for asset URLs (TTL: 1 hour)
+    this.assetUrlCache = new Map();
+    this.CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
     // Create axios instance with connection pooling
     this.axiosInstance = axios.create({
       baseURL: this.apiUrl,
@@ -57,9 +61,6 @@ class MondayController {
     // Map extracted data to Monday columns
     const columnValues = this.mapDataToColumns(extractedData);
 
-    console.log(`📝 Updating board ${boardId}, item ${itemId}`);
-    console.log(`📝 Column values to send:`, JSON.stringify(columnValues, null, 2));
-
     const query = `
       mutation ($boardId: ID!, $itemId: ID!, $columnValues: JSON!) {
         change_multiple_column_values(
@@ -68,12 +69,6 @@ class MondayController {
           column_values: $columnValues
         ) {
           id
-          name
-          column_values {
-            id
-            text
-            value
-          }
         }
       }
     `;
@@ -85,7 +80,7 @@ class MondayController {
     };
 
     const result = await this.executeQuery(query, variables);
-    console.log(`✅ Monday API response:`, JSON.stringify(result.change_multiple_column_values?.column_values || [], null, 2));
+    console.log(`  💾 Monday.com updated`);
 
     return result;
   }
@@ -313,8 +308,6 @@ class MondayController {
 
       const protocol = urlString.startsWith('https') ? https : http;
 
-      console.log(`Downloading from: ${urlString}`);
-
       // Check if URL is a pre-signed S3 URL (doesn't need auth header)
       const isS3Url = urlString.includes('amazonaws.com') || urlString.includes('X-Amz-Signature');
 
@@ -328,25 +321,20 @@ class MondayController {
       }
 
       protocol.get(urlString, { headers }, (response) => {
-        console.log(`Response status: ${response.statusCode}`);
-        console.log(`Content-Type: ${response.headers['content-type']}`);
-
         // Follow redirects
         if (response.statusCode === 302 || response.statusCode === 301) {
           const redirectUrl = response.headers.location;
-          console.log(`Following redirect to: ${redirectUrl}`);
           const redirectProtocol = redirectUrl.startsWith('https') ? https : http;
 
           // Don't send auth header for S3 redirects either
           const redirectHeaders = { 'User-Agent': 'Mozilla/5.0' };
 
           redirectProtocol.get(redirectUrl, { headers: redirectHeaders }, (redirectResponse) => {
-            console.log(`Redirect response status: ${redirectResponse.statusCode}`);
             redirectResponse.pipe(file);
             file.on('finish', () => {
               file.close();
               const stats = fs.statSync(filePath);
-              console.log(`File downloaded: ${stats.size} bytes`);
+              console.log(`  ⬇️  Downloaded: ${fileName} (${(stats.size / 1024).toFixed(1)}KB)`);
               resolve(filePath);
             });
           }).on('error', reject);
@@ -355,7 +343,7 @@ class MondayController {
           file.on('finish', () => {
             file.close();
             const stats = fs.statSync(filePath);
-            console.log(`File downloaded: ${stats.size} bytes`);
+            console.log(`  ⬇️  Downloaded: ${fileName} (${(stats.size / 1024).toFixed(1)}KB)`);
             resolve(filePath);
           });
         } else {
@@ -371,35 +359,45 @@ class MondayController {
   }
 
   /**
-   * Get file URL from asset ID using Monday.com Assets API
+   * Get file URL from asset ID using Monday.com Assets API (with caching)
    */
   async getAssetUrl(assetId) {
+    const cacheKey = String(assetId);
+
+    // Check cache first
+    const cached = this.assetUrlCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < this.CACHE_TTL)) {
+      return cached.url;
+    }
+
     const query = `
       query ($assetIds: [ID!]!) {
         assets(ids: $assetIds) {
           id
-          name
-          url
           public_url
         }
       }
     `;
 
     const variables = {
-      assetIds: [String(assetId)]
+      assetIds: [cacheKey]
     };
 
     try {
       const result = await this.executeQuery(query, variables);
 
       if (result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        return asset.public_url || asset.url;
+        const url = result.assets[0].public_url;
+
+        // Cache the URL
+        this.assetUrlCache.set(cacheKey, { url, timestamp: Date.now() });
+
+        return url;
       }
 
       throw new Error(`Asset ${assetId} not found`);
     } catch (error) {
-      console.error('Error fetching asset URL:', error);
+      console.error(`Error fetching asset URL: ${error.message}`);
       throw error;
     }
   }

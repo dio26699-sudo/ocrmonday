@@ -54,7 +54,7 @@ app.post('/api/monday-webhook', async (req, res) => {
 // Add item to processing queue
 function addToQueue(itemId, boardId) {
   processingQueue.push({ itemId, boardId });
-  console.log(`📥 Added item ${itemId} to queue. Queue length: ${processingQueue.length}`);
+  console.log(`\n${'='.repeat(80)}\n📥 QUEUE: Added item ${itemId} | Queue size: ${processingQueue.length}\n${'='.repeat(80)}`);
 
   // Start processors if we have capacity
   startProcessors();
@@ -64,9 +64,8 @@ function addToQueue(itemId, boardId) {
 function startProcessors() {
   while (activeProcessors < MAX_CONCURRENT_PROCESSORS && processingQueue.length > 0) {
     activeProcessors++;
-    console.log(`🚀 Starting processor #${activeProcessors} (${processingQueue.length} items in queue)`);
     processQueue().catch(error => {
-      console.error('❌ Queue processor error:', error);
+      console.error(`\n❌ FATAL: Queue processor crashed\n   Error: ${error.message}\n`);
     });
   }
 }
@@ -74,37 +73,32 @@ function startProcessors() {
 // Process queue items continuously
 async function processQueue() {
   try {
-    while (true) {
-      // Check if there are items in the queue
-      if (processingQueue.length === 0) {
-        break;
-      }
-
+    while (processingQueue.length > 0) {
       const { itemId, boardId } = processingQueue.shift();
+      const startTime = Date.now();
 
-      console.log(`⚙️ Processing item ${itemId} (${processingQueue.length} items remaining, ${activeProcessors} active processors)`);
+      console.log(`\n🔵 START: Processing item ${itemId} | Queue: ${processingQueue.length} remaining`);
 
       try {
         await processItemExtraction(itemId, boardId);
-        console.log(`✅ Completed item ${itemId}`);
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        console.log(`✅ SUCCESS: Item ${itemId} completed in ${duration}s`);
       } catch (error) {
-        console.error(`❌ Failed to process item ${itemId}:`, error.message);
-        // Continue processing queue even if one item fails
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        console.error(`❌ FAILED: Item ${itemId} after ${duration}s\n   Error: ${error.message}`);
       }
 
       // Small delay between items
       await new Promise(resolve => setTimeout(resolve, 500));
     }
   } catch (processorError) {
-    console.error(`❌ Processor crashed:`, processorError.message);
+    console.error(`\n❌ FATAL: Processor crashed\n   Error: ${processorError.message}\n`);
   } finally {
-    // This processor is done
     activeProcessors--;
-    console.log(`✅ Processor finished (${activeProcessors} processors still active, ${processingQueue.length} items in queue)`);
 
     // Always restart processors if there are more items
     if (processingQueue.length > 0 && activeProcessors < MAX_CONCURRENT_PROCESSORS) {
-      console.log(`🔄 Restarting processor for ${processingQueue.length} remaining items`);
+      console.log(`🔄 RESTART: Queue has ${processingQueue.length} items remaining\n`);
       startProcessors();
     }
   }
@@ -139,20 +133,22 @@ async function processAllBoardItems(boardId) {
 
 // Process extraction for a Monday.com item
 async function processItemExtraction(itemId, boardId) {
+  let filePath = null;
+
   try {
     // Get the item and its file column
     const itemData = await mondayController.getItemFiles(itemId);
 
     if (!itemData || !itemData.files || itemData.files.length === 0) {
-      console.log('⚠️ No files found');
+      console.log('  ⚠️  No files attached');
       return;
     }
 
-    // Process the first file
     const file = itemData.files[0];
+    console.log(`  📄 File: ${file.name}`);
 
     if (!file.url) {
-      console.log('❌ File URL is missing');
+      console.log('  ❌ File URL missing');
       return;
     }
 
@@ -162,33 +158,37 @@ async function processItemExtraction(itemId, boardId) {
       downloadUrl = await mondayController.getAssetUrl(file.url);
     }
 
-    const filePath = await mondayController.downloadFile(downloadUrl, file.name);
+    filePath = await mondayController.downloadFile(downloadUrl, file.name);
 
     // Extract data
-    const fileObj = {
+    const extractedData = await fileController.extractData({
       originalname: file.name,
       path: filePath
-    };
-
-    const extractedData = await fileController.extractData(fileObj);
-
-    console.log('✅ Extracted:', {
-      totalValue: extractedData.totalValue,
-      invoiceNumber: extractedData.invoiceNumber,
-      supplierName: extractedData.supplierName
     });
+
+    // Log extracted data
+    const hasData = extractedData.totalValue || extractedData.invoiceNumber || extractedData.supplierName;
+    if (hasData) {
+      console.log(`  📊 Extracted: Total=${extractedData.totalValue || 'N/A'} | Invoice=${extractedData.invoiceNumber || 'N/A'} | Supplier=${extractedData.supplierName || 'N/A'}`);
+    } else {
+      console.log(`  ⚠️  No data extracted from QR code`);
+    }
 
     // Update Monday.com item
     await mondayController.updateMondayBoard(boardId, itemId, extractedData);
 
-    console.log('✅ Item updated successfully!');
-
-    // Clean up downloaded file
-    fs.unlinkSync(filePath);
-
   } catch (error) {
-    console.error('❌ Error processing item:', error);
+    console.error(`  ❌ Processing error: ${error.message}`);
     throw error;
+  } finally {
+    // Clean up downloaded file
+    if (filePath && fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (cleanupError) {
+        console.log(`  ⚠️  Cleanup failed: ${cleanupError.message}`);
+      }
+    }
   }
 }
 

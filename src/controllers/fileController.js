@@ -60,8 +60,9 @@ class FileController {
    * Extract text from PDF by scanning QR code
    */
   async extractFromPDF(filePath) {
+    let tempImagePath = null;
+
     try {
-      console.log(`Converting PDF to image: ${filePath}`);
       const { createCanvas } = require('canvas');
       const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
 
@@ -75,31 +76,16 @@ class FileController {
       const canvas = createCanvas(viewport.width, viewport.height);
       const context = canvas.getContext('2d');
 
-      const renderContext = {
-        canvasContext: context,
-        viewport: viewport
-      };
-
-      await page.render(renderContext).promise;
+      await page.render({ canvasContext: context, viewport: viewport }).promise;
 
       const imageBuffer = canvas.toBuffer('image/png');
-      const tempImagePath = filePath.replace('.pdf', '_temp.png');
+      tempImagePath = filePath.replace('.pdf', '_temp.png');
       require('fs').writeFileSync(tempImagePath, imageBuffer);
 
-      let qrData;
-      try {
-        qrData = await this.scanQRCode(tempImagePath);
-      } finally {
-        // Always cleanup temp file
-        try {
-          require('fs').unlinkSync(tempImagePath);
-        } catch (cleanupError) {
-          console.log(`Temp file cleanup warning: ${cleanupError.message}`);
-        }
-      }
+      const qrData = await this.scanQRCode(tempImagePath);
 
       if (qrData) {
-        console.log(`✅ PDF QR extracted`);
+        console.log(`  🔍 QR Found (PDF): ${qrData.substring(0, 50)}...`);
         const invoiceData = this.parseQRCodeData(qrData);
         return {
           text: qrData,
@@ -108,6 +94,7 @@ class FileController {
         };
       }
 
+      console.log(`  ⚠️  QR code not detected in PDF`);
       return {
         text: '',
         method: 'qr-code-pdf-failed',
@@ -117,7 +104,7 @@ class FileController {
         customerNIF: null
       };
     } catch (error) {
-      console.log(`PDF error: ${error.message}`);
+      console.log(`  ⚠️  PDF processing error: ${error.message}`);
       return {
         text: '',
         method: 'qr-code-pdf-error',
@@ -126,6 +113,15 @@ class FileController {
         supplierName: null,
         customerNIF: null
       };
+    } finally {
+      // Always cleanup temp file
+      if (tempImagePath) {
+        try {
+          require('fs').unlinkSync(tempImagePath);
+        } catch (cleanupError) {
+          // Ignore cleanup errors
+        }
+      }
     }
   }
 
@@ -134,21 +130,18 @@ class FileController {
    */
   async extractFromImage(filePath) {
     try {
-      console.log(`Scanning QR code on: ${filePath}`);
       const qrData = await this.scanQRCode(filePath);
 
       if (qrData) {
-        console.log(`QR code full data: ${qrData}`);
         const invoiceData = this.parseQRCodeData(qrData);
-
-        console.log(`✅ QR code extraction successful`);
+        console.log(`  🔍 QR Found: ${qrData.substring(0, 50)}...`);
         return {
           text: qrData,
           method: 'qr-code',
           ...invoiceData
         };
       } else {
-        console.log(`❌ No QR code found in image`);
+        console.log(`  ⚠️  QR code not detected`);
         return {
           text: '',
           method: 'qr-code',
@@ -159,23 +152,7 @@ class FileController {
         };
       }
     } catch (error) {
-      console.error('QR scan error:', error.message);
-      console.error('File path:', filePath);
-
-      // Check if file exists
-      const fs = require('fs');
-      if (fs.existsSync(filePath)) {
-        const stats = fs.statSync(filePath);
-        console.error('File size:', stats.size, 'bytes');
-
-        // Try to read first bytes to check format
-        const buffer = fs.readFileSync(filePath);
-        const header = buffer.slice(0, 4).toString('hex');
-        console.error('File header (hex):', header);
-      } else {
-        console.error('File does not exist!');
-      }
-
+      console.error(`  ❌ QR scan failed: ${error.message}`);
       throw error;
     }
   }
@@ -369,8 +346,6 @@ class FileController {
       const originalWidth = image.bitmap.width;
       const originalHeight = image.bitmap.height;
 
-      console.log(`Image dimensions: ${originalWidth}x${originalHeight}`);
-
       // Try scanning original first (best quality)
       let code = this.tryQRScan(image);
       if (code) {
@@ -440,7 +415,6 @@ class FileController {
     // Try jsQR first (fast)
     const code = jsQR(new Uint8ClampedArray(data), width, height);
     if (code && code.data) {
-      console.log(`QR code full data (jsQR): ${code.data}`);
       return code.data;
     }
 
@@ -459,7 +433,6 @@ class FileController {
 
       const result = reader.decode(binaryBitmap);
       if (result && result.getText()) {
-        console.log(`QR code full data (ZXing): ${result.getText()}`);
         return result.getText();
       }
     } catch (zxingError) {
