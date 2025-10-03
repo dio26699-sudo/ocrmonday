@@ -71,30 +71,81 @@ class FileController {
       const pdfDocument = await loadingTask.promise;
 
       const page = await pdfDocument.getPage(1);
-      const viewport = page.getViewport({ scale: 2.0 });
 
-      const canvas = createCanvas(viewport.width, viewport.height);
-      const context = canvas.getContext('2d');
+      // Try multiple scales to improve QR detection
+      const scales = [3.0, 2.5, 2.0, 1.5];
 
-      await page.render({ canvasContext: context, viewport: viewport }).promise;
+      for (const scale of scales) {
+        try {
+          const viewport = page.getViewport({ scale });
 
-      const imageBuffer = canvas.toBuffer('image/png');
-      tempImagePath = filePath.replace('.pdf', '_temp.png');
-      require('fs').writeFileSync(tempImagePath, imageBuffer);
+          const canvas = createCanvas(viewport.width, viewport.height);
+          const context = canvas.getContext('2d');
 
-      const qrData = await this.scanQRCode(tempImagePath);
+          await page.render({ canvasContext: context, viewport: viewport }).promise;
 
-      if (qrData) {
-        console.log(`  🔍 QR Found (PDF): ${qrData.substring(0, 50)}...`);
-        const invoiceData = this.parseQRCodeData(qrData);
-        return {
-          text: qrData,
-          method: 'qr-code-pdf',
-          ...invoiceData
-        };
+          const imageBuffer = canvas.toBuffer('image/png');
+          tempImagePath = filePath.replace('.pdf', `_temp_${scale}.png`);
+          require('fs').writeFileSync(tempImagePath, imageBuffer);
+
+          console.log(`  📐 PDF rendered at ${scale}x scale (${Math.round(viewport.width)}x${Math.round(viewport.height)}px)`);
+
+          const qrData = await this.scanQRCode(tempImagePath);
+
+          // Clean up this temp file
+          try {
+            require('fs').unlinkSync(tempImagePath);
+          } catch (e) {}
+
+          if (qrData) {
+            console.log(`  🔍 QR Found (PDF @ ${scale}x): ${qrData.substring(0, 50)}...`);
+            const invoiceData = this.parseQRCodeData(qrData);
+            return {
+              text: qrData,
+              method: 'qr-code-pdf',
+              ...invoiceData
+            };
+          }
+        } catch (scaleError) {
+          console.log(`  ⚠️  Scale ${scale}x failed: ${scaleError.message}`);
+          // Try next scale
+        }
       }
 
-      console.log(`  ⚠️  QR code not detected in PDF`);
+      console.log(`  ⚠️  QR code not detected in PDF (tried ${scales.length} scales)`);
+      console.log(`  🔄 Attempting OCR fallback for ATCUD...`);
+
+      // Fallback: Try OCR to extract ATCUD and parse invoice data from text
+      try {
+        const viewport = page.getViewport({ scale: 2.0 });
+        const canvas = createCanvas(viewport.width, viewport.height);
+        const context = canvas.getContext('2d');
+        await page.render({ canvasContext: context, viewport: viewport }).promise;
+
+        const imageBuffer = canvas.toBuffer('image/png');
+        tempImagePath = filePath.replace('.pdf', '_ocr.png');
+        require('fs').writeFileSync(tempImagePath, imageBuffer);
+
+        const Tesseract = require('tesseract.js');
+        const { data: { text } } = await Tesseract.recognize(tempImagePath, 'por', {
+          logger: () => {} // Silent
+        });
+
+        // Try to parse invoice data from OCR text
+        const invoiceData = this.parseInvoiceData(text);
+
+        if (invoiceData.totalValue || invoiceData.invoiceNumber) {
+          console.log(`  📝 OCR extracted data`);
+          return {
+            text: text,
+            method: 'ocr-fallback',
+            ...invoiceData
+          };
+        }
+      } catch (ocrError) {
+        console.log(`  ⚠️  OCR fallback failed: ${ocrError.message}`);
+      }
+
       return {
         text: '',
         method: 'qr-code-pdf-failed',
