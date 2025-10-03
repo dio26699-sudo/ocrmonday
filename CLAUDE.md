@@ -16,24 +16,34 @@ npm start
 ```
 Server runs on port 3000 (or `PORT` from `.env`)
 
-**Monday.com Deployment:**
+**Railway Deployment:**
 ```bash
-# Deploy to Monday.com hosting
-mapps code:push -i 11359882
+# Login to Railway
+railway login
 
-# Check deployment status
-mapps code:status -v 11359882
+# Link to your project (first time only)
+railway link
+
+# Deploy to Railway
+railway up
 
 # View live logs
-mapps code:logs -i 11359882 -t console -s live
-mapps code:logs -i 11359882 -t http -s live
+railway logs
 
 # Set environment variables
-mapps code:env -i 11359882 -k MONDAY_API_TOKEN -v "your_token"
-mapps code:env -i 11359882 -k PORT -v "8080"
+railway variables set MONDAY_API_TOKEN="your_token"
+railway variables set PORT=3000
+
+# View all environment variables
+railway variables
+
+# Open Railway dashboard
+railway open
 ```
 
-**IMPORTANT:** Always use version ID `-i 11359882` (NOT app ID `-a 10591578`) when deploying.
+**Required Environment Variables:**
+- `MONDAY_API_TOKEN` - Your Monday.com API token
+- `PORT` - Server port (Railway auto-assigns, but can be set manually)
 
 ## Architecture
 
@@ -116,11 +126,12 @@ The queue system uses a `finally` block to ensure:
 
 ### Deployment Considerations
 
-**Monday.com Hosting:**
-- Server must listen on `0.0.0.0` (not localhost)
+**Railway Hosting:**
+- Server must listen on `0.0.0.0` (not localhost) - already configured in [src/index.js:199](src/index.js#L199)
 - Linux environment requires canvas-based PDF processing (no pdf-poppler)
-- Environment variables set via `mapps code:env`
-- Deployment URL: `https://e1dae-service-19767679-f54d16a2.us.monday.app`
+- Environment variables set via Railway dashboard or CLI (`railway variables set`)
+- Railway auto-generates deployment URL
+- **Memory Optimization:** Free tier has 512MB RAM limit - currently using `MAX_CONCURRENT_PROCESSORS = 1` and `--max-old-space-size=450` flag
 
 **Performance:**
 - 3 concurrent processors = ~3x faster than sequential
@@ -132,7 +143,7 @@ The queue system uses a `finally` block to ensure:
 
 **Trigger Processing:**
 1. Change item status to "Feito" in Monday board
-2. Check logs: `mapps code:logs -i 11359882 -t console -s live`
+2. Check logs: `railway logs` or via Railway dashboard
 3. Verify columns updated with extracted data
 
 **Monitor Queue:**
