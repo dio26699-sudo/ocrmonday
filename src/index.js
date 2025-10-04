@@ -64,6 +64,7 @@ function addToQueue(itemId, boardId) {
 function startProcessors() {
   while (activeProcessors < MAX_CONCURRENT_PROCESSORS && processingQueue.length > 0) {
     activeProcessors++;
+    console.log(`🚀 Processor #${activeProcessors} started | Active: ${activeProcessors}/${MAX_CONCURRENT_PROCESSORS}`);
     processQueue().catch(error => {
       console.error(`\n❌ FATAL: Queue processor crashed\n   Error: ${error.message}\n`);
     });
@@ -77,7 +78,7 @@ async function processQueue() {
       const { itemId, boardId } = processingQueue.shift();
       const startTime = Date.now();
 
-      console.log(`\n🔵 START: Processing item ${itemId} | Queue: ${processingQueue.length} remaining`);
+      console.log(`\n🔵 START: Processing item ${itemId} | Queue: ${processingQueue.length} remaining | Active processors: ${activeProcessors}`);
 
       try {
         await processItemExtraction(itemId, boardId);
