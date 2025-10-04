@@ -70,9 +70,9 @@ class FileController {
 
       const page = await pdfDocument.getPage(1);
 
-      // Try only 2 scales - memory constrained (512MB on Railway)
+      // Try 3 scales (optimized for 8GB Railway)
       // Higher scale first for better QR resolution
-      const scales = [3.0, 2.0];
+      const scales = [4.0, 3.0, 2.0];
 
       for (const scale of scales) {
         try {
@@ -384,30 +384,51 @@ class FileController {
       const originalWidth = image.bitmap.width;
       const originalHeight = image.bitmap.height;
 
-      // Try only the 6 most effective strategies (memory constrained: 512MB)
+      // Try 10 most effective strategies (optimized for 8GB RAM)
 
       // Strategy 1: Original
       let code = await tryStrategy('original', (img) => {});
       if (code) return code;
 
-      // Strategy 2: Normalize + contrast (best for general scans)
+      // Strategy 2: Greyscale only (baseline)
+      code = await tryStrategy('greyscale', (img) => img.greyscale());
+      if (code) return code;
+
+      // Strategy 3: Normalize + contrast (best for general scans)
       code = await tryStrategy('normalize', (img) => img.greyscale().normalize().contrast(0.8));
       if (code) return code;
 
-      // Strategy 3: Posterize for thermal receipts
-      code = await tryStrategy('posterize', (img) => img.greyscale().posterize(2).normalize());
+      // Strategy 4: High contrast + normalize (reversed order)
+      code = await tryStrategy('contrast-normalize', (img) => img.greyscale().contrast(0.9).normalize());
       if (code) return code;
 
-      // Strategy 4: Invert (for inverted QR codes)
-      code = await tryStrategy('invert', (img) => img.greyscale().invert().contrast(0.8));
+      // Strategy 5: Posterize 2 levels (thermal receipts)
+      code = await tryStrategy('posterize-2', (img) => img.greyscale().posterize(2).normalize());
       if (code) return code;
 
-      // Strategy 5: High brightness (for dark scans)
-      code = await tryStrategy('bright', (img) => img.greyscale().brightness(0.3).normalize().contrast(0.8));
+      // Strategy 6: Posterize 3 levels (different binarization)
+      code = await tryStrategy('posterize-3', (img) => img.greyscale().normalize().posterize(3));
       if (code) return code;
 
-      // Strategy 6: Greyscale + high contrast
-      code = await tryStrategy('contrast', (img) => img.greyscale().contrast(0.9));
+      // Strategy 7: Invert (for inverted QR codes)
+      code = await tryStrategy('invert', (img) => img.greyscale().invert().normalize().contrast(0.7));
+      if (code) return code;
+
+      // Strategy 8: Brightness boost (for dark scans)
+      code = await tryStrategy('bright', (img) => img.greyscale().brightness(0.4).normalize());
+      if (code) return code;
+
+      // Strategy 9: Blur + sharpen (noise reduction)
+      code = await tryStrategy('blur', (img) => img.greyscale().blur(1).normalize().contrast(0.9));
+      if (code) return code;
+
+      // Strategy 10: Extreme normalize (forces full range)
+      code = await tryStrategy('extreme-normalize', (img) => {
+        img.greyscale().normalize();
+        // Apply normalize twice for extreme contrast
+        img.contrast(1.0);
+        return img;
+      });
       if (code) return code;
 
       // Free memory
