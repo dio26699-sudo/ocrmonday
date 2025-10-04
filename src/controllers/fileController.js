@@ -1,5 +1,3 @@
-const Tesseract = require('tesseract.js');
-const pdfParse = require('pdf-parse');
 const fs = require('fs');
 const path = require('path');
 const jsQR = require('jsqr');
