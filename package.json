@@ -4,7 +4,7 @@
   "description": "Monday.com OCR app for invoice extraction",
   "main": "src/index.js",
   "scripts": {
-    "start": "node --expose-gc --max-old-space-size=450 src/index.js"
+    "start": "node --expose-gc --max-old-space-size=6144 src/index.js"
   },
   "dependencies": {
     "@zxing/library": "^0.21.3",

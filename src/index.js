@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 // Processing queue to prevent concurrent overload
 let processingQueue = [];
 let activeProcessors = 0;
-const MAX_CONCURRENT_PROCESSORS = 3; // Process 3 items concurrently (optimized for 512MB RAM)
+const MAX_CONCURRENT_PROCESSORS = 10; // Process 10 items concurrently (Railway: 8GB RAM)
 
 // Middleware
 app.use(express.json());

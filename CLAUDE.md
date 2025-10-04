@@ -50,10 +50,10 @@ railway open
 ### Core Components
 
 **Processing Queue System:**
-- **Concurrent Processing:** 3 items processed simultaneously (`MAX_CONCURRENT_PROCESSORS`)
+- **Concurrent Processing:** 10 items processed simultaneously (`MAX_CONCURRENT_PROCESSORS`)
 - **Queue Management:** `processingQueue` array with `activeProcessors` counter
 - **Auto-restart:** Processors automatically restart when queue has items
-- **Delay:** 200ms between items to prevent API overload
+- **Delay:** 500ms between items to prevent API overload
 
 **Request Flow:**
 1. Monday.com webhook triggers on status change to "Feito" (column: `color_mkwb6j7j`)
@@ -131,13 +131,14 @@ The queue system uses a `finally` block to ensure:
 - Linux environment requires canvas-based PDF processing (no pdf-poppler)
 - Environment variables set via Railway dashboard or CLI (`railway variables set`)
 - Railway auto-generates deployment URL
-- **Memory Optimization:** Free tier has 512MB RAM limit - currently using `MAX_CONCURRENT_PROCESSORS = 1` and `--max-old-space-size=450` flag
+- **Memory:** 8GB RAM available - using `MAX_CONCURRENT_PROCESSORS = 10` and `--max-old-space-size=6144` (6GB heap)
 
 **Performance:**
-- 3 concurrent processors = ~3x faster than sequential
+- 10 concurrent processors = ~10x faster than sequential
 - Connection pooling reduces overhead by 30-50%
-- Processes ~10-20 seconds per item with QR code
+- Processes ~12-15 seconds per item with QR code
 - Queue handles bulk status changes gracefully
+- Can process 100 items in ~2 minutes (vs 20+ minutes sequential)
 
 ### Testing
 
